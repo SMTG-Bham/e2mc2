@@ -21,11 +21,136 @@
 # - eci.out
 # - gs_str.out
 
-from os.path import isdir, join
+import os
+from os.path import isdir, join, curdir
 import io
 import tarfile
+import subprocess
 import json
+from contextlib import contextmanager
 
+
+@contextmanager
+def run_directory(run_path):
+    """
+    Temporarily work in another directory, creating it if necessary.
+
+    Inspired by https://pythonadventures.wordpress.com/2013/12/15/chdir-a-context-manager-for-switching-working-directories
+
+    """
+    home = os.getcwd()
+    if not os.path.isdir(run_path):
+        os.makedirs(run_path)
+    os.chdir(run_path)
+    yield
+    os.chdir(home)
+
+
+class MonteCarloCalc:
+    default_params = {
+        "T0": 100,
+        "T1": 1500,
+        "dT": 100,
+        "db": None,
+        "k": 8.617e-5,
+        "abs": False,
+        "mu0": None,
+        "mu1": None,
+        "dmu": None,
+        "gs": 0,  # Initial state (-1 for disordered)
+        "phi0": None,
+        "er": 12,
+        "innerT": False,
+        "eq": 1e4,
+        "n": 1e4,
+        "x": None,  # Concentration
+        "dx": None,  # Convergence threshold
+        "aq": None,  # Convergence param: 0:energy 1:conc
+        "tstat": 0,  # Discontinuity test (recommended value 3)
+        "sigdig": 6,
+        "o": "mc.out",  # Output filename
+        "oss": "mcsnapshot.out",
+        "opss": "psnapshot.out",  # periodic snapshots
+        "is": None,  # Initial state file
+        "ks": None,
+        "cm": True,  # Canonical (fixed composition)
+        "g2c": True,  # Report canonical values instead of GC
+        "q": False,  # Quiet
+        "sd": None,  # Random number seed
+        "dl": False,  # Drop last point after phase transition
+    }
+
+    _bool_params = {"innerT", "cm", "q", "abs", "dl", "g2c"}
+    _int_params = {"eq", "n", "gs"}
+
+    def __init__(self, cluster_expansion, **kwargs):
+        """
+        Monte Carlo from cluster expansion using ATAT/EMC2
+
+        Args:
+            cluster_expansion (e2mc2.ClusterExpansion or str): 
+                Object containing CE parameters or path to input files or path
+                to serialised data (.tar or .json file)
+
+            **kwargs: Optional arguments corresponding to EMC2 command line 
+                parameters. To change defaults, you can modify 
+                MonteCarloCalc.default_params before instantiating object.
+
+        Properties:
+            params (dict): Dictionary of EMC2 command line parameters
+            cluster_expansion (e2mc2.ClusterExpansion): CE data for calculation
+
+        Methods:
+            set: Set EMC2 parameters
+            set_ce: Update cluster expansion data
+        """
+
+        if isinstance(cluster_expansion, ClusterExpansion):
+            self.cluster_expansion = cluster_expansion
+        elif type(cluster_expansion) == str:
+            self.cluster_expansion = ClusterExpansion(cluster_expansion)
+        else:
+            raise ValueError("Not appropriate CE data")
+
+        self.params = MonteCarloCalc.default_params
+
+        self.set(**kwargs)
+
+    def set(self, **kwargs):
+        """Update EMC2 run parameters with keyword args"""
+        self.params.update(kwargs)
+
+    def calc_write_files(self, calc_directory="emc2_run"):
+        """Prepare directory for EMC2 calculation, with log of params"""
+        if isdir(calc_directory):
+            raise IOError("Calculation directory {0} already "
+                          "exists".format(calc_directory))
+
+        self.cluster_expansion.write_dir(calc_directory)
+
+        with open(join(calc_directory, "emc2_params.json"), 'w') as f:
+                json.dump(self.params, f)
+
+    def run(self, calc_directory="emc2_run"):
+        self.calc_write_files(calc_directory)
+
+        command = ['emc2']
+
+        for k, v in self.params.items():
+            if v is None or v is False:
+                pass
+            elif k in MonteCarloCalc._int_params:
+                command.append('-' + k)
+                command.append(str(int(v)))
+            elif k in MonteCarloCalc._bool_params:
+                command.append('-' + k)
+            else:
+                command.append('-' + k)
+                command.append(str(v))
+
+        with run_directory(calc_directory):
+            subprocess.call(command)
+                
 class ClusterExpansion:
     def __init__(self, mapsrun):
         """
@@ -39,11 +164,8 @@ class ClusterExpansion:
                 - JSON serialised form of this object                
         """
 
-        self._infiles = (("lat.in", "lat"),
-                         ("clusters.out", "clusters"),
-                         ("eci.out", "eci"),
-                         ("gs_str.out", "gs"))
-
+        self._infiles = (("lat.in", "lat"), ("clusters.out", "clusters"),
+                         ("eci.out", "eci"), ("gs_str.out", "gs"))
 
         if isdir(mapsrun):
             for infile, p in self._infiles:
@@ -54,7 +176,7 @@ class ClusterExpansion:
                 for infile, p in self._infiles:
                     with t.extractfile(infile) as f:
                         setattr(self, p, f.read().decode())
-                        
+
         else:
             try:
                 with open(mapsrun, 'r') as f:
@@ -93,5 +215,5 @@ class ClusterExpansion:
                 tarinfo = tarfile.TarInfo(name=infile)
                 data = getattr(self, p).encode("ascii")
                 tarinfo.size = len(data)
-                data_io = io.BytesIO(data)              
+                data_io = io.BytesIO(data)
                 t.addfile(tarinfo=tarinfo, fileobj=data_io)
