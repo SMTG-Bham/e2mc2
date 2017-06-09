@@ -28,7 +28,10 @@ import tarfile
 import subprocess
 import json
 from contextlib import contextmanager
+import glob
+import re
 
+import pandas as pd
 
 @contextmanager
 def run_directory(run_path):
@@ -132,6 +135,7 @@ class MonteCarloCalc:
                 json.dump(self.params, f)
 
     def run(self, calc_directory="emc2_run"):
+        """Call EMC2 in a new directory with current parameter settings"""
         self.calc_write_files(calc_directory)
 
         command = ['emc2']
@@ -150,7 +154,37 @@ class MonteCarloCalc:
 
         with run_directory(calc_directory):
             subprocess.call(command)
-                
+
+    def read_output(self, output="emc2_run"):
+        """Read output files from EMC2 run and attach to object"""
+        if isdir(output):
+
+            n_clusters = len(self.ce.eci.split())
+            data = pd.read_table(join(output, 'mc.out'), skipinitialspace=True,
+                                 usecols=range(17 + n_clusters), header=None)
+            clusters_headers = ['C' + str(i+1) for i in range(n_clusters)]
+            data.columns = ['T', 'mu', 
+                            'E', 'x', 'phi', 'E2', 'x2', 
+                            'E_lte', 'x_lte', 'phi_lte', 
+                            'E_mf', 'x_mf', 'phi_mf', 
+                            'E_hte', 'x_hte', 'phi_hte', 
+                            'lro'] + clusters_headers
+
+            self.mc_data = data
+
+            # emc2 is a bit inconsiderate in how it handles snapshots, and the
+            # counter eats into the end of the filename. We need to use globs
+            # and regex to find and sort these. We assume that the first four
+            # characters are distinctive and intact.
+            if "opss" in self.ce.params and self.ce.params["opss"] is not None:
+                basename = self.ce.params["opss"]
+                snapshots = glob.glob(basename[:4] + '*.out')
+
+                num_parts = re.compile(r'\d+').findall
+                def sortkey(filename):
+                    return int(num_parts(filename)[0])
+                self.snapshot_files = sorted(snapshots, key=sortkey)
+
 class ClusterExpansion:
     def __init__(self, mapsrun):
         """
