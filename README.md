@@ -10,6 +10,15 @@ in
 - A Unix-like filesystem
 - ATAT should be on the system PATH
 
+## Installation
+In the project directory (containing this README):
+
+    pip3 install --user .
+
+You may need to add your local installation directories to `PATH` and
+`PYTHONPATH` if this has not already been done; these will be
+something like `~/.local/bin` and `~/.local/python3/site-packages`.
+
 ## Goals
 
 The goal is to make it easier to manage sets of many Monte Carlo runs
