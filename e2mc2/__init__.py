@@ -33,6 +33,7 @@ import re
 
 import pandas as pd
 
+
 @contextmanager
 def run_directory(run_path):
     """
@@ -132,7 +133,7 @@ class MonteCarloCalc:
         self.cluster_expansion.write_dir(calc_directory)
 
         with open(join(calc_directory, "emc2_params.json"), 'w') as f:
-                json.dump(self.params, f)
+            json.dump(self.params, f)
 
     def run(self, calc_directory="emc2_run"):
         """Call EMC2 in a new directory with current parameter settings"""
@@ -155,20 +156,27 @@ class MonteCarloCalc:
         with run_directory(calc_directory):
             subprocess.call(command)
 
+    def read_params(self, filename="emc2_params.json"):
+        with open(filename, 'r') as f:
+            self.params = json.load(f)
+
     def read_output(self, output="emc2_run"):
         """Read output files from EMC2 run and attach to object"""
         if isdir(output):
 
-            n_clusters = len(self.ce.eci.split())
-            data = pd.read_table(join(output, 'mc.out'), skipinitialspace=True,
-                                 usecols=range(17 + n_clusters), header=None)
-            clusters_headers = ['C' + str(i+1) for i in range(n_clusters)]
-            data.columns = ['T', 'mu', 
-                            'E', 'x', 'phi', 'E2', 'x2', 
-                            'E_lte', 'x_lte', 'phi_lte', 
-                            'E_mf', 'x_mf', 'phi_mf', 
-                            'E_hte', 'x_hte', 'phi_hte', 
-                            'lro'] + clusters_headers
+            self.read_params(join(output, "emc2_params.json"))
+
+            n_clusters = len(self.cluster_expansion.eci.split())
+            data = pd.read_table(
+                join(output, 'mc.out'),
+                skipinitialspace=True,
+                usecols=range(17 + n_clusters),
+                header=None)
+            clusters_headers = ['C' + str(i + 1) for i in range(n_clusters)]
+            data.columns = ['T', 'mu', 'E', 'x', 'phi', 'E2', 'x2', 'E_lte',
+                            'x_lte', 'phi_lte', 'E_mf', 'x_mf', 'phi_mf',
+                            'E_hte', 'x_hte', 'phi_hte', 'lro'
+                            ] + clusters_headers
 
             self.mc_data = data
 
@@ -176,14 +184,17 @@ class MonteCarloCalc:
             # counter eats into the end of the filename. We need to use globs
             # and regex to find and sort these. We assume that the first four
             # characters are distinctive and intact.
-            if "opss" in self.ce.params and self.ce.params["opss"] is not None:
-                basename = self.ce.params["opss"]
+            if "opss" in self.params and self.params["opss"] is not None:
+                basename = self.params["opss"]
                 snapshots = glob.glob(basename[:4] + '*.out')
 
                 num_parts = re.compile(r'\d+').findall
+
                 def sortkey(filename):
                     return int(num_parts(filename)[0])
+
                 self.snapshot_files = sorted(snapshots, key=sortkey)
+
 
 class ClusterExpansion:
     def __init__(self, mapsrun):
@@ -198,18 +209,22 @@ class ClusterExpansion:
                 - JSON serialised form of this object                
         """
 
-        self._infiles = (("lat.in", "lat"), ("clusters.out", "clusters"),
+        self._infiles = (("lat.in", "lat"), ("clusters.out", "clusters_txt"),
                          ("eci.out", "eci"), ("gs_str.out", "gs"))
 
         if isdir(mapsrun):
             for infile, p in self._infiles:
                 with open(join(mapsrun, infile), 'r', encoding="ascii") as f:
-                    setattr(self, p, f.read().decode())
+                    setattr(self, p, f.read())
+
+            self.clusters = self.clusters_txt.split("\n\n")
+
         elif tarfile.is_tarfile(mapsrun):
             with tarfile.open(mapsrun, 'r', encoding="ascii") as t:
                 for infile, p in self._infiles:
                     with t.extractfile(infile) as f:
                         setattr(self, p, f.read().decode())
+            self.clusters = self.clusters_txt.split("\n\n")
 
         else:
             try:
@@ -218,8 +233,10 @@ class ClusterExpansion:
             except ValueError:
                 raise Exception("This doesn't seem to be a directory, "
                                 "a tar file or a JSON file. I give up.")
-            for _, p in self._infiles:
-                setattr(self, p, data[p])
+            for k, v in data.items():
+                setattr(self, k, v)
+
+            self.clusters_txt = "\n\n".join(self.clusters)
 
     def todict(self):
         """Get a dict of input data files for serialisation"""
