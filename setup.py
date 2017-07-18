@@ -34,7 +34,7 @@ setup(
         'Topic :: Scientific/Engineering :: Chemistry',
         'Topic :: Scientific/Engineering :: Physics'
         ],
-    keywords='chemistry ase dft vasp',
+    keywords='chemistry dft cluster monte carlo',
     packages=find_packages(),
     package_data={'': ['tests/MgAl2O4.json']},
     install_requires=['pandas'], # Packages go here e.g. numpy, ase

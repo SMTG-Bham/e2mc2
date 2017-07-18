@@ -32,7 +32,7 @@ import glob
 import re
 
 import pandas as pd
-
+import numpy as np
 
 @contextmanager
 def run_directory(run_path):
@@ -87,26 +87,27 @@ class MonteCarloCalc:
     _bool_params = {"innerT", "cm", "q", "abs", "dl", "g2c"}
     _int_params = {"eq", "n", "gs"}
 
-    def __init__(self, cluster_expansion, **kwargs):
+    def __init__(self, cluster_expansion, output=None, **kwargs):
         """
         Monte Carlo from cluster expansion using ATAT/EMC2
 
         Args:
-            cluster_expansion (e2mc2.ClusterExpansion or str): 
+            cluster_expansion (e2mc2.ClusterExpansion or str):
                 Object containing CE parameters or path to input files or path
                 to serialised data (.tar or .json file)
 
-            **kwargs: Optional arguments corresponding to EMC2 command line 
-                parameters. To change defaults, you can modify 
+            output (str):
+                Path to Monte Carlo calculation directory. If provided, results
+                will be loaded. Otherwise, a fresh MC run is initialised.
+
+            **kwargs: Optional arguments corresponding to EMC2 command line
+                parameters. To change defaults, you can modify
                 MonteCarloCalc.default_params before instantiating object.
 
-        Properties:
+        Attributes:
             params (dict): Dictionary of EMC2 command line parameters
             cluster_expansion (e2mc2.ClusterExpansion): CE data for calculation
 
-        Methods:
-            set: Set EMC2 parameters
-            set_ce: Update cluster expansion data
         """
 
         if isinstance(cluster_expansion, ClusterExpansion):
@@ -119,6 +120,9 @@ class MonteCarloCalc:
         self.params = MonteCarloCalc.default_params
 
         self.set(**kwargs)
+
+        if output is not None:
+            self.read_output(output)
 
     def set(self, **kwargs):
         """Update EMC2 run parameters with keyword args"""
@@ -186,7 +190,7 @@ class MonteCarloCalc:
             # characters are distinctive and intact.
             if "opss" in self.params and self.params["opss"] is not None:
                 basename = self.params["opss"]
-                snapshots = glob.glob(basename[:4] + '*.out')
+                snapshots = glob.glob(join(output, basename[:4]) + '*.out')
 
                 num_parts = re.compile(r'\d+').findall
 
@@ -194,6 +198,50 @@ class MonteCarloCalc:
                     return int(num_parts(filename)[0])
 
                 self.snapshot_files = sorted(snapshots, key=sortkey)
+
+    @property
+    def snapshots(self):
+        pass
+
+    @snapshots.getter
+    def snapshots(self):
+        return [atoms_from_sqs(filename) for filename in self.snapshot_files]
+
+
+def atoms_from_sqs(filename):
+    """Get an ASE atoms object from an ATAT structure file
+
+    Args:
+        filename (str): Path to structure file (e.g. Monte Carlo snapshot)
+
+    Returns:
+        ase.atoms.Atoms object
+
+    """
+
+    try:
+        import ase.atoms
+    except ImportError:
+        raise ImportError("Need the ASE package to handle structures")
+
+    with open(filename, 'r') as f:
+        lines = f.readlines()
+    lines = [line.split() for line in lines]
+
+    basis = np.matrix([list(map(float, line)) for line in lines[:3]])
+    scell = np.matrix([list(map(float, line)) for line in lines[3:6]])
+
+    spositions = [np.matrix(list(map(float, line[:3]))) for line in lines[6:]]
+    symbols = [line[-1] for line in lines[6:]]
+
+    supercell = scell * basis
+    positions = spositions * basis
+    atoms = ase.atoms.Atoms(symbols=symbols,
+                            cell=supercell,
+                            positions=positions,
+                            pbc=True)
+    return atoms
+
 
 
 class ClusterExpansion:
@@ -206,7 +254,7 @@ class ClusterExpansion:
                 - Directory location containing lat.in, clusters.out, eci.out,
                   gs_str.out
                 - Tar file containing same set of files
-                - JSON serialised form of this object                
+                - JSON serialised form of this object
         """
 
         self._infiles = (("lat.in", "lat"), ("clusters.out", "clusters_txt"),
