@@ -258,7 +258,7 @@ class ClusterExpansion:
                 - JSON serialised form of this object
         """
 
-        self._infiles = (("lat.in", "lat"), ("clusters.out", "clusters_txt"),
+        self._infiles = (("lat.in", "lat"),
                          ("gs_str.out", "gs"))
 
         if isdir(mapsrun):
@@ -266,7 +266,7 @@ class ClusterExpansion:
                 with open(join(mapsrun, infile), 'r', encoding="ascii") as f:
                     setattr(self, p, f.read())
 
-            self.clusters = self.clusters_txt.split("\n\n")
+            self._read_clusters(join(mapsrun, "clusters.out"))
             self._read_eci(join(mapsrun, "eci.out"))
 
         elif tarfile.is_tarfile(mapsrun):
@@ -274,7 +274,8 @@ class ClusterExpansion:
                 for infile, p in self._infiles:
                     with t.extractfile(infile) as f:
                         setattr(self, p, f.read().decode())
-            self.clusters = self.clusters_txt.split("\n\n")
+                self._read_eci("eci.out", tar=t)
+                self._read_clusters("clusters.out", tar=t)
 
         else:
             try:
@@ -285,8 +286,6 @@ class ClusterExpansion:
                                 "a tar file or a JSON file. I give up.")
             for k, v in data.items():
                 setattr(self, k, v)
-
-            self.clusters_txt = "\n\n".join(self.clusters)
 
     def todict(self):
         """Get a dict of input data files for serialisation"""
@@ -310,6 +309,7 @@ class ClusterExpansion:
                 f.write(getattr(self, p))
 
         self._write_eci(eci_out=join(dirname, "eci.out"))
+        self._write_clusters(join(dirname, "clusters.out"))
 
     def write_tar(self, filename):
         """Write cluster expansion files to tar file for archiving"""
@@ -319,15 +319,35 @@ class ClusterExpansion:
                 _ascii_to_tar_collection(t, infile, data)
 
             self._write_eci(tar=t)
+            self._write_clusters(tar=t)
 
-    def _read_eci(self, eci_out):
+    def _read_eci(self, eci_out="eci.out", tar=None):
         """Read ECI file and store as a list of floats
+
+        Args:
+            eci_out (str): Path to eci file
+            tar (tarfile.TarFile or str or None): If path provided, data is
+                pulled from a tar file
 
         Trailing newlines are removed; one trailing newline will be added when
         writing new ECI files."""
 
-        with open(eci_out, 'r') as f:
-            eci_txt = f.read()
+        if tar is None:
+            with open(eci_out, 'r') as f:
+                eci_txt = f.read()
+
+        elif type(tar) is tarfile.TarFile:
+            with tar.extractfile(eci_out) as f:
+                eci_txt = f.read().decode()
+
+        elif type(tar) is str:
+            with tarfile.open(tar, 'r', encoding="ascii") as t:
+                    with t.extractfile(eci_out) as f:
+                        eci_txt = f.read().decode()
+        else:
+            raise Exception("tar argument not understood. Pass a string or a "
+                            "tarfile.TarFile")
+
         self.eci = [float(x) for x in eci_txt.strip("\n").split("\n")]
 
     def _write_eci(self, eci_out="eci.out", precision=6, tar=None):
@@ -349,6 +369,52 @@ class ClusterExpansion:
                 f.write(data)
         else:
             _ascii_to_tar_collection(tar, eci_out, data)
+
+    def _read_clusters(self, clusters_out="clusters.out", tar=None):
+        """Read clusters.out file and store as a list of text blocks
+
+        Args:
+            clusters_out (str): Path to clusters file
+            tar (tarfile.TarFile or str or None): If path provided, data is
+                pulled from a tar file
+
+        """
+
+        if tar is None:
+            with open(clusters_out, 'r') as f:
+                clusters_txt = f.read()
+
+        elif type(tar) is tarfile.TarFile:
+            with tar.extractfile(clusters_out) as f:
+                clusters_txt = f.read().decode()
+
+        elif type(tar) is str:
+            with tarfile.open(tar, 'r', encoding="ascii") as t:
+                    with t.extractfile(clusters_out) as f:
+                        clusters_txt = f.read().decode()
+        else:
+            raise Exception("tar argument not understood. Pass a string or a "
+                            "tarfile.TarFile")
+
+        self.clusters = clusters_txt.split("\n\n")
+
+    def _write_clusters(self, clusters_out="clusters.out", tar=None):
+        """Write cluster file
+
+        Args:
+            clusters_out (str): Name/path of new file
+            tar (tarfile.TarFile or str): If provided, add the the file to a
+                tar collection instead of writing file to path.
+
+        """
+
+        data = "\n\n".join(self.clusters) + "\n"
+
+        if tar is None:
+            with open(clusters_out, 'w') as f:
+                f.write(data)
+        else:
+            _ascii_to_tar_collection(tar, clusters_out, data)
 
 
 def _ascii_to_tar_collection(tar, filename, data):
