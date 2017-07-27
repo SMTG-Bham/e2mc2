@@ -34,12 +34,14 @@ import re
 import pandas as pd
 import numpy as np
 
+
 @contextmanager
 def run_directory(run_path):
     """
     Temporarily work in another directory, creating it if necessary.
 
-    Inspired by https://pythonadventures.wordpress.com/2013/12/15/chdir-a-context-manager-for-switching-working-directories
+    Inspired by https://pythonadventures.wordpress.com/2013/12/15/
+    chdir-a-context-manager-for-switching-working-directories
 
     """
     home = os.getcwd()
@@ -243,7 +245,6 @@ def atoms_from_sqs(filename):
     return atoms
 
 
-
 class ClusterExpansion:
     def __init__(self, mapsrun):
         """
@@ -258,7 +259,7 @@ class ClusterExpansion:
         """
 
         self._infiles = (("lat.in", "lat"), ("clusters.out", "clusters_txt"),
-                         ("eci.out", "eci"), ("gs_str.out", "gs"))
+                         ("gs_str.out", "gs"))
 
         if isdir(mapsrun):
             for infile, p in self._infiles:
@@ -266,6 +267,7 @@ class ClusterExpansion:
                     setattr(self, p, f.read())
 
             self.clusters = self.clusters_txt.split("\n\n")
+            self._read_eci(join(mapsrun, "eci.out"))
 
         elif tarfile.is_tarfile(mapsrun):
             with tarfile.open(mapsrun, 'r', encoding="ascii") as t:
@@ -307,12 +309,74 @@ class ClusterExpansion:
             with open(join(dirname, filename), 'w') as f:
                 f.write(getattr(self, p))
 
+        self._write_eci(eci_out=join(dirname, "eci.out"))
+
     def write_tar(self, filename):
         """Write cluster expansion files to tar file for archiving"""
         with tarfile.open(filename, 'w') as t:
             for infile, p in self._infiles:
-                tarinfo = tarfile.TarInfo(name=infile)
-                data = getattr(self, p).encode("ascii")
-                tarinfo.size = len(data)
-                data_io = io.BytesIO(data)
-                t.addfile(tarinfo=tarinfo, fileobj=data_io)
+                data = getattr(self, p)
+                _ascii_to_tar_collection(t, infile, data)
+
+            self._write_eci(tar=t)
+
+    def _read_eci(self, eci_out):
+        """Read ECI file and store as a list of floats
+
+        Trailing newlines are removed; one trailing newline will be added when
+        writing new ECI files."""
+
+        with open(eci_out, 'r') as f:
+            eci_txt = f.read()
+        self.eci = [float(x) for x in eci_txt.strip("\n").split("\n")]
+
+    def _write_eci(self, eci_out="eci.out", precision=6, tar=None):
+        """Write ECI file and store as a list of floats
+
+        Args:
+            eci_out (str): Name/path of new file
+            precision (int): Decimal places. (6 is consistent with MAPS output)
+            tar (tarfile.TarFile or str): If provided, add the the file to a
+                tar collection instead of writing file to path.
+
+        """
+        format_str = "{{0:.{0}f}}\n".format(precision)
+
+        data = "".join([format_str.format(eci) for eci in self.eci])
+
+        if tar is None:
+            with open(eci_out, 'w') as f:
+                f.write(data)
+        else:
+            _ascii_to_tar_collection(tar, eci_out, data)
+
+
+def _ascii_to_tar_collection(tar, filename, data):
+    """Write an ascii string to a new file within a tar collection
+
+    Args:
+        tar (tarfile.TarFile or str): Tar collection to use. If a TarFile
+            handle is passed it will be left open, assuming that setup and
+            teardown is being handled in an outer loop.  Alternatively, a
+            string can be used as the filename for a new tar file which will be
+            safely closed at the end of this function.
+        filename (str): Name or path of the new file to be created inside the
+            tar collection.
+        data (str): String to be encoded to ascii and written to file.
+
+    """
+
+    if type(tar) is tarfile.TarFile:
+        t = tar
+    elif type(tar) is str:
+        t = tarfile.open(tar, 'w')
+
+    try:
+        tarinfo = tarfile.TarInfo(name=filename)
+        byte_data = data.encode("ascii")
+        tarinfo.size = len(byte_data)
+        data_io = io.BytesIO(byte_data)
+        t.addfile(tarinfo=tarinfo, fileobj=data_io)
+    finally:
+        if type(tar) is str:
+            t.close()
