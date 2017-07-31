@@ -172,7 +172,7 @@ class MonteCarloCalc:
 
             self.read_params(join(output, "emc2_params.json"))
 
-            n_clusters = len(self.cluster_expansion.eci.split())
+            n_clusters = len(self.cluster_expansion.eci)
             data = pd.read_table(
                 join(output, 'mc.out'),
                 skipinitialspace=True,
