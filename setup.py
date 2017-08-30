@@ -40,7 +40,7 @@ setup(
     install_requires=['pandas'], # Packages go here e.g. numpy, ase
     test_suite='setup.unit_tests',
     entry_points={'console_scripts': [
-        'make-traj = e2mc2.tools.make_traj.main',
-        'add-atoms = e2mc2.tools.add_atoms.main',
+        'make-traj = e2mc2.tools.make_traj:main',
+        'add-atoms = e2mc2.tools.add_atoms:main',
         ]},
     )
