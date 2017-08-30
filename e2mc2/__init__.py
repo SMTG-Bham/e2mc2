@@ -89,7 +89,7 @@ class MonteCarloCalc:
     _bool_params = {"innerT", "cm", "q", "abs", "dl", "g2c"}
     _int_params = {"eq", "n", "gs"}
 
-    def __init__(self, cluster_expansion, output=None, **kwargs):
+    def __init__(self, cluster_expansion=None, output=None, **kwargs):
         """
         Monte Carlo from cluster expansion using ATAT/EMC2
 
@@ -112,7 +112,9 @@ class MonteCarloCalc:
 
         """
 
-        if isinstance(cluster_expansion, ClusterExpansion):
+        if cluster_expansion is None and type(output) == str:
+            self.cluster_expansion = ClusterExpansion(output)
+        elif isinstance(cluster_expansion, ClusterExpansion):
             self.cluster_expansion = cluster_expansion
         elif type(cluster_expansion) == str:
             self.cluster_expansion = ClusterExpansion(cluster_expansion)
@@ -172,17 +174,18 @@ class MonteCarloCalc:
 
             self.read_params(join(output, "emc2_params.json"))
 
-            n_clusters = len(self.cluster_expansion.eci)
-            data = pd.read_table(
-                join(output, 'mc.out'),
-                skipinitialspace=True,
-                usecols=range(17 + n_clusters),
-                header=None)
+            n_clusters = len(self.cluster_expansion.clusters) - 1
             clusters_headers = ['C' + str(i + 1) for i in range(n_clusters)]
-            data.columns = ['T', 'mu', 'E', 'x', 'phi', 'E2', 'x2', 'E_lte',
+            names = ['T', 'mu', 'E', 'x', 'phi', 'E2', 'x2', 'E_lte',
                             'x_lte', 'phi_lte', 'E_mf', 'x_mf', 'phi_mf',
                             'E_hte', 'x_hte', 'phi_hte', 'lro'
                             ] + clusters_headers
+            data = pd.read_table(
+                join(output, 'mc.out'),
+                skipinitialspace=True,
+                names=names,
+                header=None,
+                index_col=False)
 
             self.mc_data = data
 
@@ -229,7 +232,6 @@ def atoms_from_sqs(filename):
     with open(filename, 'r') as f:
         lines = f.readlines()
     lines = [line.split() for line in lines]
-
     basis = np.matrix([list(map(float, line)) for line in lines[:3]])
     scell = np.matrix([list(map(float, line)) for line in lines[3:6]])
 
